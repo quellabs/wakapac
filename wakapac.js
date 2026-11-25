@@ -7938,21 +7938,104 @@
 
 
     /**
-     * Rebuilds foreach elements affected by a batch of reactive changes
-     * (see flushReactiveChanges). A rebuild is triggered when:
+     * Whether a bare `foreach: rows` binding's Rule-1 match is a leaf item
+     * mutation — a change that cannot affect array membership or order, so
+     * it doesn't need a destructive rebuild. A dot-nested path (e.g.
+     * `rows.selectedCount`) is a property set on the array object itself,
+     * not an item, so it's always a leaf mutation. A property nested inside
+     * an item (e.g. `todos[0].done`) is also a leaf mutation, since item
+     * bindings update independently. Replacing a whole item (e.g.
+     * `todos[0] = x`) is NOT a leaf mutation — the path ends right after the
+     * index, with nothing nested beneath it — so it still needs a rebuild.
+     *
+     * Only applies to a bare array identifier (excludes computed expressions,
+     * whose dependencies are unknown) with no nested `foreach` template
+     * (which relies on the outer rebuild to re-scan it).
+     * @param {Object} mappingData - The foreach element's mapping data.
+     * @param {string} pathString - The changed path (see Utils.pathArrayToString).
+     * @returns {boolean} True if this change is a leaf item mutation.
+     */
+    Runtime.prototype.isLeafItemMutation = function(mappingData, pathString) {
+        const isBareArrayIdentifier = /^[A-Za-z_$][\w$]*$/.test(mappingData.foreachExpr) && mappingData.foreachExpr === mappingData.sourceArray;
+
+        // Cached on mappingData: the template never changes after creation.
+        mappingData._hasNestedForeach ??= NESTED_FOREACH_RE.test(_expandPartialsInString(mappingData.template));
+
+        if (!isBareArrayIdentifier || mappingData._hasNestedForeach) {
+            return false;
+        }
+
+        const dotPrefix = mappingData.foreachExpr + '.';
+
+        if (pathString.startsWith(dotPrefix)) {
+            return true;
+        }
+
+        const indexPrefix = mappingData.foreachExpr + '[';
+
+        if (!pathString.startsWith(indexPrefix)) {
+            return false;
+        }
+
+        const closeBracketIndex = pathString.indexOf(']', indexPrefix.length);
+
+        return closeBracketIndex !== -1 && closeBracketIndex + 1 < pathString.length;
+    };
+
+    /**
+     * Classifies how a single reactive change relates to one foreach binding,
+     * applying all of rebuildForeachesForBatch's matching rules in one place:
      *
      * 1. The changed path matches, contains, or is nested within the
-     *    foreach array path (e.g. changing `data` affects `data.items`).
+     *    foreach array path (e.g. changing `data` affects `data.items`) —
+     *    reported via `directMatch`, already resolved by the caller.
      * 2. A computed foreach expression depends on the changed property
      *    (e.g. changing `filter` or `todos` affects `filteredTodos`).
      * 3. A dynamic bracket key changes (e.g. `region` in
      *    `foreach: cities[country][region]`).
      *
-     * Exception: A bare `foreach: todos` skips rebuilds for nested item
-     * changes like `todos[0].done`. Structural array changes are reported
-     * at the array's own path, while item bindings update independently.
-     * This optimization excludes computed expressions and templates with
-     * nested foreach loops, which require outer rebuilds.
+     * A Rule-1 match that's a leaf item mutation (see isLeafItemMutation)
+     * is still a match, but doesn't need a rebuild.
+     * @param {Object} mappingData - The foreach element's mapping data.
+     * @param {string} pathString - The changed path (see Utils.pathArrayToString).
+     * @param {string|null} changedProp - The sole top-level property that
+     *   changed, or null for a deeper path — Rules 2 and 3 only apply to a
+     *   single top-level property change.
+     * @param {Set<string>|null} dependents - Computed-dependency set for changedProp.
+     * @param {RegExp|null} bracketPattern - Matches changedProp used as a dynamic bracket key.
+     * @param {boolean} directMatch - Whether Rule 1 already matched this binding.
+     * @returns {{matched: boolean, needsRebuild: boolean}} Whether this
+     *   foreach is affected by the change, and if so, whether that requires
+     *   a destructive rebuild.
+     */
+    Runtime.prototype.classifyForeachChange = function(mappingData, pathString, changedProp, dependents, bracketPattern, directMatch) {
+        let computedMatch = false;
+        let bracketMatch = false;
+
+        if (changedProp) {
+            const expr = mappingData.foreachExpr;
+            const source = mappingData.sourceArray;
+
+            // Rule 2: foreach expression is a computed that reads changedProp.
+            computedMatch = dependents && (dependents.has(expr) || dependents.has(source));
+
+            // Rule 3: changedProp is used as a dynamic bracket key in the expression.
+            bracketMatch = bracketPattern.test(expr);
+        }
+
+        if (!directMatch && !computedMatch && !bracketMatch) {
+            return { matched: false, needsRebuild: false };
+        }
+
+        const needsRebuild = computedMatch || bracketMatch || (directMatch && !this.isLeafItemMutation(mappingData, pathString));
+
+        return { matched: true, needsRebuild: needsRebuild };
+    };
+
+    /**
+     * Rebuilds foreach elements affected by a batch of reactive changes
+     * (see flushReactiveChanges), using classifyForeachChange to decide
+     * whether and how each foreach binding is affected by each change.
      *
      * Each affected foreach element is rebuilt at most once per batch,
      * even when multiple changes or conditions match.
@@ -7994,25 +8077,10 @@
                 // Rule 1: bound array path equals, is nested under, or is an
                 // ancestor of the changed path.
                 const directMatch = directMatches.has(element);
-
-                // Rules 2 and 3 only apply when a single top-level property
-                // changed (changedProp is null for deeper paths — see above).
-                let computedMatch = false;
-                let bracketMatch = false;
-
-                if (changedProp) {
-                    const expr = mappingData.foreachExpr;
-                    const source = mappingData.sourceArray;
-
-                    // Rule 2: foreach expression is a computed that reads changedProp.
-                    computedMatch = dependents && (dependents.has(expr) || dependents.has(source));
-
-                    // Rule 3: changedProp is used as a dynamic bracket key in the expression.
-                    bracketMatch = bracketPattern.test(expr);
-                }
+                const classification = this.classifyForeachChange(mappingData, pathString, changedProp, dependents, bracketPattern, directMatch);
 
                 // No rule matched — this foreach is unaffected by this change.
-                if (!directMatch && !computedMatch && !bracketMatch) {
+                if (!classification.matched) {
                     continue;
                 }
 
@@ -8032,35 +8100,7 @@
                     info.directMatch = true;
                 }
 
-                // A bare `foreach: rows` only needs rebuilding for structural array changes,
-                // which are always reported at the array's own path. A dot-nested path
-                // (e.g. `rows.selectedCount`) is a property set on the array object itself,
-                // not an item, so it's always a leaf mutation. Nested property changes
-                // within an item (e.g. `todos[0].done`) cannot affect membership or order,
-                // and bindings update independently. Replacing a whole item (e.g.
-                // `todos[0] = x`) is NOT such a leaf mutation — the path ends right after
-                // the index, with nothing nested beneath it — so it still rebuilds.
-                // This optimization excludes computed expressions (unknown dependencies)
-                // and nested `foreach` templates (which rely on outer rebuilds to re-scan).
-                const isBareArrayIdentifier = /^[A-Za-z_$][\w$]*$/.test(mappingData.foreachExpr) && mappingData.foreachExpr === mappingData.sourceArray;
-
-                // Cached on mappingData: the template never changes after creation.
-                mappingData._hasNestedForeach ??= NESTED_FOREACH_RE.test(_expandPartialsInString(mappingData.template));
-                let isLeafItemMutation = false;
-
-                if (directMatch && isBareArrayIdentifier && !mappingData._hasNestedForeach) {
-                    const dotPrefix = mappingData.foreachExpr + '.';
-                    const indexPrefix = mappingData.foreachExpr + '[';
-
-                    if (pathString.startsWith(dotPrefix)) {
-                        isLeafItemMutation = true;
-                    } else if (pathString.startsWith(indexPrefix)) {
-                        const closeBracketIndex = pathString.indexOf(']', indexPrefix.length);
-                        isLeafItemMutation = closeBracketIndex !== -1 && closeBracketIndex + 1 < pathString.length;
-                    }
-                }
-
-                if (computedMatch || bracketMatch || (directMatch && !isLeafItemMutation)) {
+                if (classification.needsRebuild) {
                     info.needsRebuild = true;
                 }
 
