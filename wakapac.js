@@ -6984,12 +6984,13 @@
         // Whether a computed's current output is identity-preserving can depend on
         // its data (e.g. a computed that branches between .map() and .filter()), so
         // the answer is only safe to cache within a single reactive-update pass, not
-        // for the component's lifetime — flushReactiveChanges() clears this cache
-        // before each pass. That still matters because a foreach nested inside
-        // another foreach's items gets fresh, unregistered DOM elements on every
-        // rebuild within the same pass (renderForeach replaces innerHTML wholesale)
-        // — without this cache, the identity check below would otherwise re-run,
-        // and re-evaluate the computed itself, once per outer item per outer render.
+        // for the component's lifetime — flushReactiveChanges() calls
+        // invalidateArrayRootCache() before each pass. That still matters because a
+        // foreach nested inside another foreach's items gets fresh, unregistered DOM
+        // elements on every rebuild within the same pass (renderForeach replaces
+        // innerHTML wholesale) — without this cache, the identity check below would
+        // otherwise re-run, and re-evaluate the computed itself, once per outer item
+        // per outer render.
         //
         // Cached by lookupName, not computedName: a ternary's raw expression text
         // can resolve to a different active branch per item (same text, different
@@ -7032,6 +7033,16 @@
 
         cache.set(lookupName, result);
         return result;
+    };
+
+    /**
+     * Discards inferArrayRoot()'s memoized results. Must be called before each
+     * reactive-update pass (see flushReactiveChanges) — a computed's
+     * identity-preservingness can depend on its inputs, so a cached answer from
+     * an earlier pass can no longer be trusted once the data has changed.
+     */
+    Runtime.prototype.invalidateArrayRootCache = function() {
+        this.arrayRootCache.clear();
     };
 
     /**
@@ -7736,9 +7747,9 @@
                 this.pendingChanges = [];
 
                 // inferArrayRoot()'s cache is only valid for the current data snapshot — a
-                // computed's identity-preservingness can depend on its inputs — so clear it
-                // before each pass rather than letting it persist across data changes.
-                this.arrayRootCache.clear();
+                // computed's identity-preservingness can depend on its inputs — so discard
+                // it before each pass rather than letting it persist across data changes.
+                this.invalidateArrayRootCache();
                 this.updateElementBindings();
                 this.updateTextInterpolations();
                 this.updateCommentConditionals();
