@@ -8033,23 +8033,31 @@
                 }
 
                 // A bare `foreach: rows` only needs rebuilding for structural array changes,
-                // which are always reported at the array's own path. Nested property
-                // changes within an item (e.g. `todos[0].done`) cannot affect membership
-                // or order, and bindings update independently. Replacing a whole item
-                // (e.g. `todos[0] = x`) is NOT such a leaf mutation — the path ends right
-                // after the index, with nothing nested beneath it — so it still rebuilds.
+                // which are always reported at the array's own path. A dot-nested path
+                // (e.g. `rows.selectedCount`) is a property set on the array object itself,
+                // not an item, so it's always a leaf mutation. Nested property changes
+                // within an item (e.g. `todos[0].done`) cannot affect membership or order,
+                // and bindings update independently. Replacing a whole item (e.g.
+                // `todos[0] = x`) is NOT such a leaf mutation — the path ends right after
+                // the index, with nothing nested beneath it — so it still rebuilds.
                 // This optimization excludes computed expressions (unknown dependencies)
                 // and nested `foreach` templates (which rely on outer rebuilds to re-scan).
                 const isBareArrayIdentifier = /^[A-Za-z_$][\w$]*$/.test(mappingData.foreachExpr) && mappingData.foreachExpr === mappingData.sourceArray;
 
                 // Cached on mappingData: the template never changes after creation.
                 mappingData._hasNestedForeach ??= NESTED_FOREACH_RE.test(_expandPartialsInString(mappingData.template));
-                const indexPrefix = mappingData.foreachExpr + '[';
                 let isLeafItemMutation = false;
 
-                if (directMatch && isBareArrayIdentifier && !mappingData._hasNestedForeach && pathString.startsWith(indexPrefix)) {
-                    const closeBracketIndex = pathString.indexOf(']', indexPrefix.length);
-                    isLeafItemMutation = closeBracketIndex !== -1 && closeBracketIndex + 1 < pathString.length;
+                if (directMatch && isBareArrayIdentifier && !mappingData._hasNestedForeach) {
+                    const dotPrefix = mappingData.foreachExpr + '.';
+                    const indexPrefix = mappingData.foreachExpr + '[';
+
+                    if (pathString.startsWith(dotPrefix)) {
+                        isLeafItemMutation = true;
+                    } else if (pathString.startsWith(indexPrefix)) {
+                        const closeBracketIndex = pathString.indexOf(']', indexPrefix.length);
+                        isLeafItemMutation = closeBracketIndex !== -1 && closeBracketIndex + 1 < pathString.length;
+                    }
                 }
 
                 if (computedMatch || bracketMatch || (directMatch && !isLeafItemMutation)) {
