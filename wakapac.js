@@ -7989,7 +7989,6 @@
         }
 
         const closeBracketIndex = pathString.indexOf(']', indexPrefix.length);
-
         return closeBracketIndex !== -1 && closeBracketIndex + 1 < pathString.length;
     };
 
@@ -8040,7 +8039,7 @@
 
         const needsRebuild = computedMatch || bracketMatch || (directMatch && !this.isLeafItemMutation(mappingData, pathString));
 
-        return { matched: true, needsRebuild: needsRebuild };
+        return { matched: true, needsRebuild };
     };
 
     /**
