@@ -6038,7 +6038,7 @@
                 // Re-proxy all items with correct indices after the operation
                 // This ensures all objects have the proper path references
                 newArray.forEach((item, index) => {
-                    if (item && typeof item === 'object' && !item._isReactive && shouldWrapValue(item)) {
+                    if (shouldWrapValue(item) && !item._isReactive) {
                         const correctPath = currentPath.concat([index]);
                         newArray[index] = createProxy(item, correctPath);
                         newArray[index]._isReactive = true;
@@ -6156,7 +6156,7 @@
             }
 
             // If the value is an object/array and not already reactive, wrap it in a proxy
-            if (val && typeof val === 'object' && !val._isReactive && shouldMakeReactive(prop) && shouldWrapValue(val)) {
+            if (shouldWrapValue(val) && !val._isReactive && shouldMakeReactive(prop)) {
                 // Return raw value if the data is already proxied
                 if (val._externalProxy) {
                     return val;
@@ -6213,7 +6213,7 @@
             }
 
             // Wrap objects and arrays in proxies when they're assigned
-            if (newValue && typeof newValue === 'object' && shouldWrapValue(newValue)) {
+            if (shouldWrapValue(newValue)) {
                 target[prop] = createProxy(newValue, propertyPath);
                 target[prop]._isReactive = true;
             } else {
