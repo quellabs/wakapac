@@ -8041,6 +8041,7 @@
                 // This optimization excludes computed expressions (unknown dependencies)
                 // and nested `foreach` templates (which rely on outer rebuilds to re-scan).
                 const isBareArrayIdentifier = /^[A-Za-z_$][\w$]*$/.test(mappingData.foreachExpr) && mappingData.foreachExpr === mappingData.sourceArray;
+
                 // Cached on mappingData: the template never changes after creation.
                 mappingData._hasNestedForeach ??= NESTED_FOREACH_RE.test(_expandPartialsInString(mappingData.template));
                 const indexPrefix = mappingData.foreachExpr + '[';
