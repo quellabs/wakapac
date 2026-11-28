@@ -425,7 +425,7 @@
             }
 
             // Fetch step
-            const currentStep = window.PACRegistry.components[0]?.abstraction?.motionAxisDetectionStep;
+            const currentStep = window.PACRegistry.components.values().next().value?.abstraction?.motionAxisDetectionStep;
             if (currentStep === 'tilt-x' || currentStep === 'tilt-y') {
                 return;
             }
