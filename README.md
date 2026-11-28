@@ -100,10 +100,13 @@ unrelated events. Plugins read `wakaPAC.MSG_PLUGIN` when loaded, using the stand
 | Mask | `0x400`–`0x401` |
 | CKEditor 4/5, TinyMCE, Jodit | `0x500`–`0x501` |
 | ColorPicker | `0x600` |
+| Canvas | `0x700`–`0x701` |
+| DSound | `0x800`–`0x80C` |
 
 Equivalent video events share IDs across video plugins by design; equivalent
 editor events also share IDs across editor plugins. Mask, editor, and ColorPicker
-IDs have changed to remove collisions. Use the exported `MSG_*` constants instead
+IDs have changed to remove collisions. Canvas and DSound IDs have moved from
+fixed values (`0xC001`–`0xC002` and `0xD001`–`0xD00E`) into the `MSG_PLUGIN` range. Use the exported `MSG_*` constants instead
 of numeric literals, and update source and minified plugin bundles together.
 
 **Navigation & Sensors**
