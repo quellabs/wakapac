@@ -60,10 +60,9 @@
     // MESSAGE CONSTANTS
     // =========================================================================
     // Offsets from MSG_PLUGIN (block 0x900) keep these IDs out of the core
-    // message range. Read once at load; falls back to the standard 0x2000
-    // base when loaded standalone.
+    // message range. Read once at load, so wakapac.js must be loaded first.
 
-    const MSG_PLUGIN = globalThis.wakaPAC?.MSG_PLUGIN ?? 0x2000;
+    const MSG_PLUGIN = wakaPAC.MSG_PLUGIN;
     const MSG_WEBGL_RENDER = MSG_PLUGIN + 0x900;
     const MSG_WEBGL_READY = MSG_PLUGIN + 0x901;
     const MSG_WEBGL_CONTEXT_LOST = MSG_PLUGIN + 0x902;
