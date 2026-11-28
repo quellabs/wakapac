@@ -200,7 +200,7 @@
             }
 
             // Fetch step
-            state._currentStep = window.PACRegistry.components[0]?.abstraction?.motionAxisDetectionStep;
+            state._currentStep = window.PACRegistry.components.values().next().value?.abstraction?.motionAxisDetectionStep;
             if (state._currentStep === 'tilt-x' || state._currentStep === 'tilt-y') {
                 return;
             }
