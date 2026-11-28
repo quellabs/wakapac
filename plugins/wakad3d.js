@@ -59,13 +59,15 @@
     // =========================================================================
     // MESSAGE CONSTANTS
     // =========================================================================
-    // Same numeric values as when these lived in wakapac.js core, so any code
-    // (or serialized state) that hardcoded the numbers keeps working.
+    // Offsets from MSG_PLUGIN (block 0x900) keep these IDs out of the core
+    // message range. Read once at load; falls back to the standard 0x2000
+    // base when loaded standalone.
 
-    const MSG_WEBGL_RENDER = 0x0011;
-    const MSG_WEBGL_READY = 0x0401;
-    const MSG_WEBGL_CONTEXT_LOST = 0x0402;
-    const MSG_WEBGL_CONTEXT_RESTORED = 0x0403;
+    const MSG_PLUGIN = globalThis.wakaPAC?.MSG_PLUGIN ?? 0x2000;
+    const MSG_WEBGL_RENDER = MSG_PLUGIN + 0x900;
+    const MSG_WEBGL_READY = MSG_PLUGIN + 0x901;
+    const MSG_WEBGL_CONTEXT_LOST = MSG_PLUGIN + 0x902;
+    const MSG_WEBGL_CONTEXT_RESTORED = MSG_PLUGIN + 0x903;
 
     // Single source of truth for the constants that get attached to both the
     // pac instance and the WakaD3D constructor/singleton below, so there's
