@@ -308,11 +308,12 @@
      * Components receive the same { path, query, params } detail as MSG_ROUTE_CHANGE.
      * @param {WakaRoute} instance
      * @param {string} path - The normalized target path
+     * @param {string} search - The target URL's search string, e.g. '?foo=bar'
      * @returns {boolean} true if navigation was blocked
      * @private
      */
-    function _broadcastBeforeRoute(instance, path) {
-        const query = _parseQuery(location.search);
+    function _broadcastBeforeRoute(instance, path, search) {
+        const query = _parseQuery(search);
         let blocked = false;
 
         instance._routeTable.forEach(function (pattern, pacId) {
@@ -363,7 +364,7 @@
         this._popstateHandler = function () {
             const path = _normalizePath(location.pathname);
 
-            if (_broadcastBeforeRoute(self, path)) {
+            if (_broadcastBeforeRoute(self, path, location.search)) {
                 // Undo the browser navigation. We can't know the direction reliably,
                 // so we go(1) — this works for back (the common case) and is a no-op
                 // for forward if the guard triggers there too.
@@ -462,7 +463,9 @@
             throw new Error('wakaRoute: call wakaPAC.use(wakaRoute) before navigating');
         }
 
-        if (_broadcastBeforeRoute(this, _normalizePath(path))) {
+        const targetUrl = new URL(path, location.href);
+
+        if (_broadcastBeforeRoute(this, _normalizePath(targetUrl.pathname), targetUrl.search)) {
             return false;
         }
 
